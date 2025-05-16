@@ -1,6 +1,10 @@
 package examples
 
-import dsl.*
+import dsl.components.Store
+import dsl.components.createInstance
+import dsl.components.interaction
+import dsl.persistance.Persistence
+import dsl.persistance.PersistenceConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 
@@ -24,29 +28,29 @@ fun main() {
             val currentB = MyStore.b
 
             if (currentB != 0) {
-                println("[$recipeInstanceId] Calculating division: $currentA / $currentB")
+                println("[$instanceId] Calculating division: $currentA / $currentB")
                 // Writing to 'logs' automatically registers it as a target.
                 // It also triggers notifyUpdate for 'logs' in the current RecipeInstance.
                 MyStore.logs = "$currentA/$currentB=${currentA / currentB}"
             } else {
-                println("[$recipeInstanceId] Division by zero skipped.")
+                println("[$instanceId] Division by zero skipped.")
                 MyStore.logs = "Division by zero attempt" // This write also registers 'logs' as target.
             }
         },
         // Interaction depends on 'a'
         interaction("Log A Changes") {
             val currentA = MyStore.a // Dependency
-            println("[$recipeInstanceId] Got some new a value: $currentA")
+            println("[$instanceId] Got some new a value: $currentA")
         },
         // Interaction depends on 'b'
         interaction("Log B Changes") {
             val currentB = MyStore.b // Dependency
-            println("[$recipeInstanceId] Got some new b value: $currentB")
+            println("[$instanceId] Got some new b value: $currentB")
         },
         // Interaction depends on 'logs'
         interaction("On logs changed") {
             val currentLogs = MyStore.logs // Dependency
-            println("[$recipeInstanceId] Got some new logs value: $currentLogs")
+            println("[$instanceId] Got some new logs value: $currentLogs")
         }
     )
 

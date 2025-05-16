@@ -1,7 +1,7 @@
-import dsl.Store
-import dsl.createInstance
-import dsl.findInstance
-import dsl.interaction
+import dsl.components.Store
+import dsl.components.createInstance
+import dsl.components.findInstance
+import dsl.components.interaction
 import io.ktor.http.*
 import io.ktor.serialization.kotlinx.json.*
 import io.ktor.server.application.*
@@ -36,7 +36,7 @@ val cartRecipe = setOf(
     interaction("Log Cart Changes") {
         val currentItems = CartStore.items // Dependency on items
         val currentStatus = CartStore.status // Dependency on status
-        println("[$recipeInstanceId] Cart State Update: Status=$currentStatus, Items=$currentItems")
+        println("[$instanceId] Cart State Update: Status=$currentStatus, Items=$currentItems")
         // This interaction doesn't write (target) anything, just logs.
     },
 
@@ -45,7 +45,7 @@ val cartRecipe = setOf(
         if (currentItems.size > 3) {
             CartStore.status = CartStatus.PRIORITY
 
-            println("[$recipeInstanceId] Cart has enough items to reach priority: Items=$currentItems")
+            println("[$instanceId] Cart has enough items to reach priority: Items=$currentItems")
         }
     },
     // We could add interactions triggered specifically by CartStatus.SUBMITTED
