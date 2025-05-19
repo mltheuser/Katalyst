@@ -70,13 +70,8 @@ class Ingredient<T>(private val defaultValue: T) {
         // Track target if we are inside an interaction's execution context.
         currentInteraction?.addTarget(property)
 
-        // --- Update the central state store in Instance ---
-        // The KProperty is the key, newValue (of type T, stored as Any?) is the value.
-        // ConcurrentHashMap put is thread-safe.
-        currentInstance.instanceState.put(getFullPropertyName(property), ReadOnlyEncodingProxy.fromDecoded(newValue, property))
-
-        // Notify the instance that this property has changed.
-        currentInstance.notifyUpdate(property)
+        // Notify the instance that this property needs to change.
+        currentInstance.notifyUpdate(PropertyUpdate(property, newValue))
     }
 }
 

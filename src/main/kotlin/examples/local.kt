@@ -51,7 +51,8 @@ fun main() {
         interaction("On logs changed") {
             val currentLogs = MyStore.logs // Dependency
             println("[$instanceId] Got some new logs value: $currentLogs")
-        })
+        }
+    )
 
     // Use a parallel dispatcher for potentially concurrent instance processing.
     runBlocking(Dispatchers.Default) {

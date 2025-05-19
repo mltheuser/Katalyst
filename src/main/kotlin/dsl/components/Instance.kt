@@ -27,6 +27,11 @@ suspend fun String.findInstance(): Result<InstanceHandle> {
     return Result.failure(IllegalStateException("No instance with identifier ($this) exists."))
 }
 
+data class PropertyUpdate<T>(
+    val property: KProperty<T>,
+    val newValue: T,
+)
+
 /**
  * A running instance. Manages its own state,
  * work queue, and execution lifecycle independently of other instances.
@@ -62,7 +67,7 @@ class Instance(
     internal val instanceState = ConcurrentHashMap<String, ReadOnlyEncodingProxy>()
 
     // Thread-safe queue for properties that have been updated and need processing.
-    private val workList = ConcurrentLinkedQueue<KProperty<*>>()
+    private val workList = ConcurrentLinkedQueue<PropertyUpdate<*>>()
 
     // Mutex to synchronize access to the worker Job and idle state management.
     private val workerMutex = Mutex()
@@ -125,11 +130,11 @@ class Instance(
 
                 // Process work items until the coroutine is cancelled.
                 while (isActive) {
-                    val propertyToProcess = workList.poll() // Non-blocking, thread-safe poll.
+                    val updateToProcess = workList.poll() // Non-blocking, thread-safe poll.
 
-                    if (propertyToProcess != null) {
-                        println("[$instanceId] Processing update for: ${getFullPropertyName(propertyToProcess)}")
-                        runIteration(propertyToProcess)
+                    if (updateToProcess != null) {
+                        println("[$instanceId] Processing update for: ${getFullPropertyName(updateToProcess.property)}")
+                        runIteration(updateToProcess)
                     } else {
                         // Work list is empty, attempt to transition to idle.
                         // Lock is crucial to ensure atomicity of checking emptiness and setting worker to null.
@@ -180,9 +185,9 @@ class Instance(
      * Internal method called by [Ingredient.setValue] when an ingredient changes.
      * Adds the property to the work queue and ensures the worker is running.
      */
-    fun notifyUpdate(property: KProperty<*>) {
-        println("[$instanceId] Notified update for: ${getFullPropertyName(property)}")
-        workList.offer(property) // Thread-safe add to queue.
+    fun notifyUpdate(update: PropertyUpdate<*>) {
+        println("[$instanceId] Notified update for: ${getFullPropertyName(update.property)}")
+        workList.offer(update) // Thread-safe add to queue.
         ensureWorkerIsRunning() // Wake up worker if idle.
     }
 
@@ -190,14 +195,23 @@ class Instance(
      * Runs all interactions that depend on the given property.
      * If the property is null, runs all interactions (initial run).
      */
-    private suspend fun runIteration(property: KProperty<*>? = null) {
+    private suspend fun runIteration(update: PropertyUpdate<*>? = null) {
+        // Apply update to instance state
+        // --- Update the central state store in Instance ---
+        if (update != null) {
+            instanceState.put(
+                getFullPropertyName(update.property),
+                ReadOnlyEncodingProxy.fromDecoded(update.newValue, update.property)
+            )
+        }
+
         // Find interactions where the updated property is a dependency, or all if property is null.
         val dependentInteractions = interactions.filter { interaction ->
-            property == null || getFullPropertyName(property) in interaction.dependencies
+            update == null || getFullPropertyName(update.property) in interaction.dependencies
         }
 
         if (dependentInteractions.isNotEmpty()) {
-            val type = if (property == null) "initial" else "update on ${getFullPropertyName(property)}"
+            val type = if (update == null) "initial" else "update on ${getFullPropertyName(update.property)}"
             println("[$instanceId] Running ${dependentInteractions.size} interactions for $type")
 
             // Run interactions concurrently within a child scope that inherits the Instance context.
@@ -216,7 +230,7 @@ class Instance(
             }
             println("[$instanceId] Finished running interactions for $type")
         } else {
-            val type = if (property == null) "initial" else "update on ${getFullPropertyName(property)}"
+            val type = if (update == null) "initial" else "update on ${getFullPropertyName(update.property)}"
             println("[$instanceId] No interactions to run for $type")
         }
     }
