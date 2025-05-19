@@ -84,13 +84,13 @@ fun main() {
             MyStore.a = 10 // Triggers update for 'a' -> runs "Divide Something", "Log A Changes"
             MyStore.b = 5 // Triggers update for 'b' -> runs "Divide Something", "Log B Changes"
             // Note: "Divide Something" might run twice if processing isn't batched (current impl).
-            // awaitIdle() // Wait for processing of a=10, b=5.
+            awaitIdle() // Wait for processing of a=10, b=5.
             println("[$instanceId] Reading logs after setting a=10, b=5")
             println("[$instanceId] logs: ${MyStore.logs}") // Expected: "10/5=2"
 
             println("[$instanceId] Setting a = 20")
             MyStore.a = 20 // Triggers update for 'a' -> runs "Divide Something", "Log A Changes"
-            // awaitIdle() // Wait for processing of a=20.
+            awaitIdle() // Wait for processing of a=20.
             println("[$instanceId] Reading logs after setting a=20")
             val logs2 = MyStore.logs
             println("[$instanceId] logs: $logs2") // Expected: "20/5=4"

@@ -7,7 +7,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.SerializationException
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.serializer
@@ -207,8 +206,7 @@ class ReadOnlyEncodingProxy(
          * @param serializer The KSerializer for the type T.
          */
         fun <T> fromDecoded(
-            decodedObject: T,
-            property: KProperty<T>
+            decodedObject: T, property: KProperty<T>
         ): ReadOnlyEncodingProxy {
             if (decodedObject === UNINITIALIZED_VALUE) {
                 throw IllegalArgumentException("Cannot initialize fromDecoded with UNINITIALIZED_VALUE.")
@@ -221,8 +219,7 @@ class ReadOnlyEncodingProxy(
         }
     }
 
-    @Suppress("UNCHECKED_CAST")
-    operator fun <T> getValue(thisRef: Any?, property: KProperty<*>): T {
+    @Suppress("UNCHECKED_CAST") operator fun <T> getValue(thisRef: Any?, property: KProperty<*>): T {
         val currentDecoded = _decodedValue
 
         if (currentDecoded !== UNINITIALIZED_VALUE) {
@@ -308,19 +305,17 @@ class ReadOnlyEncodingProxy(
                 // 2. fromDecoded<T>() was used, T was too generic for serializer inference (e.g. Any),
                 //    _cachedSerializer remained null, AND getValue() has not been called yet to resolve it via KProperty.
                 throw IllegalStateException(
-                    "Cannot encode value: Serializer is not available. " +
-                            "If initialized with fromJson(), this is an internal error. " +
-                            "If initialized with fromDecoded() and serializer inference failed (e.g. for type 'Any'), " +
-                            "ensure getValue() is called at least once before getEncodedValue(), " +
-                            "or use the fromDecoded() overload that accepts an explicit KSerializer."
+                    "Cannot encode value: Serializer is not available. " + "If initialized with fromJson(), this is an internal error. " + "If initialized with fromDecoded() and serializer inference failed (e.g. for type 'Any'), " + "ensure getValue() is called at least once before getEncodedValue(), " + "or use the fromDecoded() overload that accepts an explicit KSerializer."
                 )
             }
 
             println("Encoding current value using cached serializer. Value: $valueToEncode")
 
             // Helper function for type-safe encoding with the KSerializer<*>
-            @Suppress("UNCHECKED_CAST")
-            fun <ActualT> internalEncode(serializer: KSerializer<ActualT>, value: Any?): String {
+            @Suppress("UNCHECKED_CAST") fun <ActualT> internalEncode(
+                serializer: KSerializer<ActualT>,
+                value: Any?
+            ): String {
                 return Json.encodeToString(serializer, value as ActualT)
             }
 
@@ -377,13 +372,18 @@ class InstanceHandle(
      * Provides a scope function `instance { ... }` syntax.
      * Ensures the code block executes within the context of this specific Instance.
      */
-    suspend operator fun invoke(block: suspend Instance.() -> Unit) {
-        withInstance(instanceId) { instanceReference ->
-            instanceReference.use { ref ->
-                ref.instance {
-                    block()
+    suspend operator fun invoke(block: suspend Instance.() -> Unit): Result<Unit> {
+        try {
+            withInstance(instanceId) { instanceReference ->
+                instanceReference.use { ref ->
+                    ref.instance {
+                        block()
+                    }
                 }
             }
+            return Result.success(Unit)
+        } catch (t: Throwable) {
+            return Result.failure(t)
         }
     }
 }
