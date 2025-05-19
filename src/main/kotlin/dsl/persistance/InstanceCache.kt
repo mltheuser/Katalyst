@@ -1,12 +1,22 @@
 package dsl.persistance
 
 import dsl.components.Instance
+import dsl.components.InteractionRegistry
+import dsl.components.getFullPropertyName
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
+import kotlinx.serialization.KSerializer
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.SerializationException
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.serializer
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.locks.ReentrantLock
 import kotlin.concurrent.withLock
+import kotlin.reflect.KProperty
+import kotlin.reflect.KType
 
 
 class InstanceCacheEntry(
@@ -96,7 +106,7 @@ class InstanceCache(
         }
 
         val lockHandle = Persistence.store.lock(id).getOrThrow()
-        Persistence.store.set(id, newInstance, lockHandle)
+        pushInstance(id, newInstance, lockHandle)
         Persistence.store.unlock(id, lockHandle).getOrThrow()
 
         return Result.success(Unit)
@@ -110,7 +120,8 @@ class InstanceCache(
         val idExists = Persistence.store.exists(id).getOrThrow()
         if (idExists) {
             val lockHandle = Persistence.store.lock(id).getOrThrow()
-            val instance = Persistence.store.get(id, lockHandle).getOrThrow()
+
+            val instance = loadInstance(id, lockHandle)
 
             val newCacheEntry = InstanceCacheEntry(instance, lockHandle, this)
             cache[id] = newCacheEntry
@@ -122,6 +133,26 @@ class InstanceCache(
 
     }
 
+    private suspend fun loadInstance(instanceId: String, lockHandle: LockHandle): Instance {
+        println("[$instanceId] Loaded from persistence.")
+        val jsonString = Persistence.store.get(instanceId, lockHandle).getOrThrow()
+        val instanceRecord = InstanceRecord.fromString(jsonString)
+
+        val interactions = instanceRecord.interactionRecords.map {
+            val interaction = InteractionRegistry.getByName(it.interactionId)!!
+            interaction.dependencies = interaction.dependencies.union(it.dependencies) as MutableSet<String>
+            interaction.targets = interaction.targets.union(it.targets).toMutableSet()
+            interaction
+        }.toSet()
+
+        val instance = Instance(instanceId, interactions)
+        instance.initialRunPerformed = instanceRecord.initialRunPerformed
+        instance.instanceState.putAll(
+            instanceRecord.instanceState.mapValues { ReadOnlyEncodingProxy.fromJson(it.value) })
+
+        return instance
+    }
+
     internal fun atomicallyRemoveEntryFromCache(id: String, entry: InstanceCacheEntry): Boolean {
         val removed = cache.remove(id, entry)
         return removed
@@ -129,8 +160,213 @@ class InstanceCache(
 
     internal suspend fun finalizeAndUnlockInstanceInDb(instance: Instance, lockHandle: LockHandle) {
         instance.awaitIdle()
-        Persistence.store.set(instance.instanceId, instance, lockHandle)
+        pushInstance(instance.instanceId, instance, lockHandle)
         Persistence.store.unlock(instance.instanceId, lockHandle)
+    }
+
+    private suspend fun pushInstance(
+        instanceId: String, instance: Instance, lockHandle: LockHandle
+    ) {
+        val record = InstanceRecord.fromInstance(instance)
+        Persistence.store.set(instance.instanceId, record.toString(), lockHandle)
+        println("[$instanceId] Persisted.")
+    }
+}
+
+class ReadOnlyEncodingProxy(
+    private val initialJsonString: String?,
+    initialDecodedObject: Any?,
+    initialSerializer: KSerializer<*>? // Can be null if not known at construction
+) {
+    private var _decodedValue: Any? = initialDecodedObject
+    private var _cachedSerializer: KSerializer<*>? = initialSerializer // Store the serializer
+
+    private val lock = Any() // For thread-safety
+
+    companion object {
+        val UNINITIALIZED_VALUE = {}
+
+        /**
+         * Creates a proxy initialized with a JSON string.
+         * The actual object will be deserialized and its serializer determined on the first call to `getValue`.
+         */
+        fun fromJson(jsonString: String): ReadOnlyEncodingProxy {
+            return ReadOnlyEncodingProxy(
+                initialJsonString = jsonString,
+                initialDecodedObject = UNINITIALIZED_VALUE,
+                initialSerializer = null // Serializer will be determined by getValue
+            )
+        }
+
+        /**
+         * Creates a proxy initialized with an already decoded object and its explicit serializer.
+         * This is the most robust way to use fromDecoded if getEncodedValue might be called
+         * before getValue.
+         *
+         * @param decodedObject The pre-decoded object.
+         * @param serializer The KSerializer for the type T.
+         */
+        fun <T> fromDecoded(
+            decodedObject: T,
+            property: KProperty<T>
+        ): ReadOnlyEncodingProxy {
+            if (decodedObject === UNINITIALIZED_VALUE) {
+                throw IllegalArgumentException("Cannot initialize fromDecoded with UNINITIALIZED_VALUE.")
+            }
+            return ReadOnlyEncodingProxy(
+                initialJsonString = null,
+                initialDecodedObject = decodedObject,
+                initialSerializer = getSerializer(property) // Store the provided serializer
+            )
+        }
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    operator fun <T> getValue(thisRef: Any?, property: KProperty<*>): T {
+        val currentDecoded = _decodedValue
+
+        if (currentDecoded !== UNINITIALIZED_VALUE) {
+            // Value was pre-decoded (from fromDecoded) or already decoded by another thread.
+            // Ensure serializer is cached if it wasn't provided or inferred during construction.
+            if (_cachedSerializer == null) {
+                synchronized(lock) { // Protect _cachedSerializer initialization
+                    if (_cachedSerializer == null) { // Double-check idiom
+                        val kType = property.returnType
+                        _cachedSerializer = Json.serializersModule.serializer(kType)
+                        println("Delegated property '${getFullPropertyName(property)}': Lazily initialized serializer via KProperty for pre-decoded object on first getValue().")
+                    }
+                }
+            }
+            return currentDecoded as T
+        }
+
+        // If we reach here, _decodedValue was UNINITIALIZED_VALUE (needs decoding from JSON)
+        return synchronized(lock) {
+            // Double-check idiom for thread-safe lazy initialization
+            if (_decodedValue === UNINITIALIZED_VALUE) {
+                val jsonToDecode = initialJsonString
+                requireNotNull(jsonToDecode) {
+                    "Internal inconsistency: Value is UNINITIALIZED but no initialJsonString was provided."
+                }
+
+                println("Delegated property '${getFullPropertyName(property)}': Decoding from JSON: \"$jsonToDecode\"")
+
+                val kType: KType = property.returnType
+                // This is the definitive serializer based on the property's type
+                val resolvedSerializer = Json.serializersModule.serializer(kType)
+                _cachedSerializer = resolvedSerializer // Cache it
+
+                val decoded = Json.decodeFromString(resolvedSerializer, jsonToDecode)
+                _decodedValue = decoded
+                decoded as T
+            } else {
+                // Another thread initialized it while this one was waiting for the lock.
+                // The serializer should have been set by the thread that performed the decoding.
+                // For robustness, ensure _cachedSerializer is set if property type is available.
+                // This path implies _decodedValue is set, so a previous getValue must have occurred or fromDecoded was used.
+                if (_cachedSerializer == null) {
+                    // This state (decoded but no serializer) is less likely if fromDecoded always tries or
+                    // the decoding thread sets it. But as a safeguard:
+                    val kType = property.returnType
+                    _cachedSerializer = Json.serializersModule.serializer(kType)
+                    println("Delegated property '${getFullPropertyName(property)}': Serializer was missing but re-resolved in getValue() (concurrent init path).")
+                }
+                _decodedValue as T
+            }
+        }
+    }
+
+    /**
+     * Returns the proxied value as a JSON string.
+     *
+     * If the proxy was initialized with a JSON string and `getValue` has not yet been called,
+     * the original JSON string is returned.
+     * Otherwise, the currently held (decoded) value is serialized back to a JSON string using
+     * the cached KSerializer.
+     *
+     * @throws IllegalStateException if the value is decoded but no KSerializer could be determined
+     * (e.g., initialized with fromDecoded<Any>(...) and getValue was never called).
+     * @return The JSON string representation of the value.
+     */
+    fun getEncodedValue(): String {
+        synchronized(lock) {
+            // Case 1: Initialized with JSON, and getValue() has NOT been called yet.
+            if (_decodedValue === UNINITIALIZED_VALUE) {
+                return initialJsonString ?: throw IllegalStateException(
+                    "Internal inconsistency: Value is UNINITIALIZED, but no initialJsonString was stored."
+                )
+            }
+
+            // Case 2: Value has been decoded or was provided pre-decoded.
+            val valueToEncode = _decodedValue
+            val serializerToUse = _cachedSerializer
+
+            if (serializerToUse == null) {
+                // This means:
+                // 1. fromJson() was used, then getValue() was called, but _cachedSerializer somehow wasn't set (internal error).
+                // OR
+                // 2. fromDecoded<T>() was used, T was too generic for serializer inference (e.g. Any),
+                //    _cachedSerializer remained null, AND getValue() has not been called yet to resolve it via KProperty.
+                throw IllegalStateException(
+                    "Cannot encode value: Serializer is not available. " +
+                            "If initialized with fromJson(), this is an internal error. " +
+                            "If initialized with fromDecoded() and serializer inference failed (e.g. for type 'Any'), " +
+                            "ensure getValue() is called at least once before getEncodedValue(), " +
+                            "or use the fromDecoded() overload that accepts an explicit KSerializer."
+                )
+            }
+
+            println("Encoding current value using cached serializer. Value: $valueToEncode")
+
+            // Helper function for type-safe encoding with the KSerializer<*>
+            @Suppress("UNCHECKED_CAST")
+            fun <ActualT> internalEncode(serializer: KSerializer<ActualT>, value: Any?): String {
+                return Json.encodeToString(serializer, value as ActualT)
+            }
+
+            return internalEncode(serializerToUse, valueToEncode)
+        }
+    }
+}
+
+fun <T> getSerializer(property: KProperty<T>): KSerializer<T> {
+    val kType: KType = property.returnType
+    // Get the serializer for the specific type T of the property
+    return Json.serializersModule.serializer(kType) as KSerializer<T>
+}
+
+@Serializable
+class InteractionRecord(
+    val interactionId: String, val dependencies: Set<String>, val targets: Set<String>
+)
+
+@Serializable
+class InstanceRecord(
+    val instanceState: Map<String, String>,
+    val initialRunPerformed: Boolean,
+    val interactionRecords: List<InteractionRecord>
+) {
+    companion object {
+        fun fromInstance(instance: Instance): InstanceRecord {
+            return InstanceRecord(
+                instanceState = instance.instanceState.mapValues { it.value.getEncodedValue() },
+                initialRunPerformed = instance.initialRunPerformed,
+                interactionRecords = instance.interactions.map { interaction ->
+                    InteractionRecord(
+                        interaction.name,
+                        interaction.dependencies,
+                        interaction.targets,
+                    )
+                })
+        }
+
+        fun fromString(jsonString: String): InstanceRecord {
+            return Json.decodeFromString<InstanceRecord>(jsonString)
+        }
+    }
+
+    override fun toString(): String {
+        return Json.encodeToString(this)
     }
 }
 

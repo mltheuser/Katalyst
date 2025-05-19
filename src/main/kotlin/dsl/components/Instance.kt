@@ -3,6 +3,7 @@ package dsl.components
 import dsl.persistance.InstanceCache
 import dsl.persistance.InstanceHandle
 import dsl.persistance.Persistence
+import dsl.persistance.ReadOnlyEncodingProxy
 import kotlinx.coroutines.*
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -31,7 +32,7 @@ suspend fun String.findInstance(): Result<InstanceHandle> {
  * work queue, and execution lifecycle independently of other instances.
  */
 class Instance(
-    val instanceId: String, private val interactions: Set<Interaction>
+    val instanceId: String, internal val interactions: Set<Interaction>
 ) {
     // --- Companion Object for Registry ---
     companion object {
@@ -58,7 +59,7 @@ class Instance(
      *
      * Uses ConcurrentHashMap for thread-safety during concurrent interaction execution.
      */
-    internal val instanceState = ConcurrentHashMap<KProperty<*>, Any?>()
+    internal val instanceState = ConcurrentHashMap<String, ReadOnlyEncodingProxy>()
 
     // Thread-safe queue for properties that have been updated and need processing.
     private val workList = ConcurrentLinkedQueue<KProperty<*>>()
@@ -71,7 +72,7 @@ class Instance(
     @Volatile private var idleDeferred = CompletableDeferred<Unit>().apply { complete(Unit) } // Start idle
 
     // Ensures the initial run (processing all interactions) happens only once.
-    private var initialRunPerformed = false
+    var initialRunPerformed = false
 
     // Dedicated scope for this instance's coroutines, automatically propagating its InstanceContext.
     private val scope = CoroutineScope(
@@ -176,7 +177,7 @@ class Instance(
     }
 
     /**
-     * Internal method called by [PropertyAccess.setValue] when an ingredient changes.
+     * Internal method called by [Ingredient.setValue] when an ingredient changes.
      * Adds the property to the work queue and ensures the worker is running.
      */
     fun notifyUpdate(property: KProperty<*>) {
@@ -192,7 +193,7 @@ class Instance(
     private suspend fun runIteration(property: KProperty<*>? = null) {
         // Find interactions where the updated property is a dependency, or all if property is null.
         val dependentInteractions = interactions.filter { interaction ->
-            property == null || property in interaction.dependencies
+            property == null || getFullPropertyName(property) in interaction.dependencies
         }
 
         if (dependentInteractions.isNotEmpty()) {
@@ -257,20 +258,20 @@ class Instance(
     fun visualize() {
         println("\n=== Interactions Graph for $instanceId ===")
         val interactions = interactions
-        val allIngredients = mutableSetOf<KProperty<*>>()
+        val allIngredients = mutableSetOf<String>()
         interactions.forEach {
             allIngredients.addAll(it.dependencies)
             allIngredients.addAll(it.targets)
         }
 
         println("\nIngredients (Properties):")
-        allIngredients.forEach { println("  * ${getFullPropertyName(it)}") }
+        allIngredients.forEach { println("  * ${it}") }
 
         println("\nInteractions:")
         interactions.forEach { interaction ->
             val name = interaction.name
-            val inputs = interaction.dependencies.joinToString(", ") { getFullPropertyName(it) }
-            val outputs = interaction.targets.joinToString(", ") { getFullPropertyName(it) }
+            val inputs = interaction.dependencies.joinToString(", ") { it }
+            val outputs = interaction.targets.joinToString(", ") { it }
             println("  * $name")
             println("    - Reads: ${if (inputs.isEmpty()) "none" else inputs}")
             println("    - Writes: ${if (outputs.isEmpty()) "none" else outputs}")
@@ -279,10 +280,10 @@ class Instance(
         println("\nData Flow:")
         interactions.forEach { interaction ->
             val deps = interaction.dependencies
-            val depStr = if (deps.isEmpty()) "(no inputs)" else deps.joinToString(", ") { getFullPropertyName(it) }
+            val depStr = if (deps.isEmpty()) "(no inputs)" else deps.joinToString(", ") { it }
             val targets = interaction.targets
             val targetStr =
-                if (targets.isEmpty()) "(no outputs)" else targets.joinToString(", ") { getFullPropertyName(it) }
+                if (targets.isEmpty()) "(no outputs)" else targets.joinToString(", ") { it }
             println("  $depStr --> [${interaction.name}] --> $targetStr")
         }
         println("\n=== End of Graph ===")

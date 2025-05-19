@@ -89,10 +89,6 @@ fun main() {
                 // --- Directly call suspend functions ---
                 createInstance(cartId, cartRecipe, expiresAfter = 12.hours)
 
-                // Optional: Wait for the initial run
-
-                println("[$cartId] Initial setup complete.")
-
                 // call.respond is a suspend function, call it directly
                 call.respond(HttpStatusCode.Created, CreateCartResponse(cartId))
                 // This log should now execute after the response is successfully initiated
@@ -108,8 +104,6 @@ fun main() {
                     return@post
                 }
 
-                val cartInstance = cartId.findInstance().getOrThrow()
-
                 // Deserialize request body to get the item name
                 val request = try {
                     call.receive<AddItemRequest>()
@@ -120,6 +114,7 @@ fun main() {
                 val itemName = request.itemName
                 println("[$cartId] Received request to add item: '$itemName'")
 
+                val cartInstance = cartId.findInstance().getOrThrow()
 
                 var addSuccessful = false
                 // Execute modifications within the specific cart's instance context

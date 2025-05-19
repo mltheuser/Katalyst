@@ -8,6 +8,29 @@ import java.util.concurrent.ConcurrentHashMap
 import kotlin.reflect.KProperty
 
 /**
+ * Registry for managing and looking up registered interactions by name.
+ */
+object InteractionRegistry {
+    private val registeredInteractions: ConcurrentHashMap<String, Interaction> = ConcurrentHashMap()
+
+    internal fun register(interaction: Interaction) {
+        val existing = registeredInteractions.putIfAbsent(interaction.name, interaction)
+        if (existing != null) {
+            throw IllegalArgumentException("Interaction with name '${interaction.name}' is already registered.")
+        }
+        println("Registered interaction: ${interaction.name}")
+    }
+
+    fun getByName(name: String): Interaction? {
+        return registeredInteractions[name]
+    }
+
+    fun getAllInteractions(): Map<String, Interaction> {
+        return registeredInteractions.toMap() // Return a copy or immutable view
+    }
+}
+
+/**
  * Defines an interaction.
  * @param name An optional descriptive name for the interaction.
  * @param implementation The suspendable lambda function containing the interaction's logic.
@@ -16,15 +39,18 @@ import kotlin.reflect.KProperty
 fun interaction(
     name: String = UUID.randomUUID().toString(), implementation: suspend InteractionScope.() -> Unit
 ): Interaction {
-    return Interaction(name, implementation)
+    val newInteraction = Interaction(name, implementation)
+    // Register the interaction immediately upon definition
+    InteractionRegistry.register(newInteraction)
+    return newInteraction
 }
 
 class Interaction(
     val name: String, private val implementation: suspend InteractionScope.() -> Unit
 ) {
-    val dependencies: MutableSet<KProperty<*>> = ConcurrentHashMap.newKeySet()
+    var dependencies: MutableSet<String> = ConcurrentHashMap.newKeySet()
 
-    val targets: MutableSet<KProperty<*>> = ConcurrentHashMap.newKeySet()
+    var targets: MutableSet<String> = ConcurrentHashMap.newKeySet()
 
     suspend fun invoke() {
         // This should always be non-null when invoke is called correctly
@@ -45,12 +71,12 @@ class Interaction(
 
     // Internal: called by PropertyAccess.getValue
     fun addDependency(property: KProperty<*>) {
-        dependencies.add(property)
+        dependencies.add(getFullPropertyName(property))
     }
 
     // Internal: called by PropertyAccess.setValue
     fun addTarget(property: KProperty<*>) {
-        targets.add(property)
+        targets.add(getFullPropertyName(property))
     }
 }
 

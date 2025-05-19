@@ -1,6 +1,5 @@
 package dsl.persistance
 
-import dsl.components.Instance
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.withTimeoutOrNull
 import java.util.*
@@ -10,7 +9,7 @@ import kotlin.time.Duration
 
 class InMemoryLockableKeyValueStore : LockableKeyValueStore {
 
-    private val dataStore = ConcurrentHashMap<String, Instance>()
+    private val dataStore = ConcurrentHashMap<String, String>()
     private val keyMutexes = ConcurrentHashMap<String, Mutex>()
     private val activeLocks = ConcurrentHashMap<String, String>() // Maps key -> lockHandle.key
 
@@ -53,7 +52,7 @@ class InMemoryLockableKeyValueStore : LockableKeyValueStore {
         return Result.success(dataStore.containsKey(key))
     }
 
-    override suspend fun get(key: String, lockHandle: LockHandle): Result<Instance> {
+    override suspend fun get(key: String, lockHandle: LockHandle): Result<String> {
         val currentActiveLockOnKey = activeLocks[key]
 
         if (currentActiveLockOnKey == null) {
@@ -71,7 +70,7 @@ class InMemoryLockableKeyValueStore : LockableKeyValueStore {
             ?: Result.failure(NoSuchElementException("Key '$key' not found in store."))
     }
 
-    override suspend fun set(key: String, value: Instance, lockHandle: LockHandle): Result<Unit> {
+    override suspend fun set(key: String, value: String, lockHandle: LockHandle): Result<Unit> {
         val currentActiveLockOnKey = activeLocks[key]
 
         if (currentActiveLockOnKey == null) {

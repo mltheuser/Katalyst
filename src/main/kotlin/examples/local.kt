@@ -51,8 +51,7 @@ fun main() {
         interaction("On logs changed") {
             val currentLogs = MyStore.logs // Dependency
             println("[$instanceId] Got some new logs value: $currentLogs")
-        }
-    )
+        })
 
     // Use a parallel dispatcher for potentially concurrent instance processing.
     runBlocking(Dispatchers.Default) {
@@ -71,7 +70,7 @@ fun main() {
             // The worker runs interactions dependent on 'b' ("Divide Something", "Log B Changes").
             MyStore.b = 2
             // Wait until the updates triggered by setting b=2 are fully processed.
-            awaitIdle()
+            // awaitIdle()
             println("[$instanceId] Reading logs after setting b=2")
             // Read the state *specific to instance1*.
             val logs1 = MyStore.logs
@@ -84,13 +83,13 @@ fun main() {
             MyStore.a = 10 // Triggers update for 'a' -> runs "Divide Something", "Log A Changes"
             MyStore.b = 5 // Triggers update for 'b' -> runs "Divide Something", "Log B Changes"
             // Note: "Divide Something" might run twice if processing isn't batched (current impl).
-            awaitIdle() // Wait for processing of a=10, b=5.
+            // awaitIdle() // Wait for processing of a=10, b=5.
             println("[$instanceId] Reading logs after setting a=10, b=5")
             println("[$instanceId] logs: ${MyStore.logs}") // Expected: "10/5=2"
 
             println("[$instanceId] Setting a = 20")
             MyStore.a = 20 // Triggers update for 'a' -> runs "Divide Something", "Log A Changes"
-            awaitIdle() // Wait for processing of a=20.
+            // awaitIdle() // Wait for processing of a=20.
             println("[$instanceId] Reading logs after setting a=20")
             val logs2 = MyStore.logs
             println("[$instanceId] logs: $logs2") // Expected: "20/5=4"
@@ -99,9 +98,11 @@ fun main() {
         println("\n--- Final State Check (Instance-Specific) ---")
         // Demonstrate that each instance maintains its separate state.
         instance1 {
+            awaitIdle()
             println("[$instanceId] Final state: a=${MyStore.a}, b=${MyStore.b}, logs=${MyStore.logs}") // a=4, b=2, logs="4/2=2"
         }
         instance2 {
+            awaitIdle()
             println("[$instanceId] Final state: a=${MyStore.a}, b=${MyStore.b}, logs=${MyStore.logs}") // a=20, b=5, logs="20/5=4"
         }
 
@@ -113,5 +114,6 @@ fun main() {
         // instance2.visualize() // Would print the identical structure graph.
 
     } // End runBlocking
+
     println("\n--- Main Finished ---")
 }

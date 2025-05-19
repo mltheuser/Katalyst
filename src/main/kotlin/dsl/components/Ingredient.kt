@@ -1,5 +1,7 @@
 package dsl.components
 
+import dsl.persistance.ReadOnlyEncodingProxy
+import dsl.persistance.getSerializer
 import kotlin.reflect.KProperty
 
 
@@ -8,7 +10,7 @@ import kotlin.reflect.KProperty
  * instance updates upon modification. Automatically tracks dependencies/targets
  * when accessed within an Interaction context.
  */
-class PropertyAccess<T>(private val defaultValue: T) {
+class Ingredient<T>(private val defaultValue: T) {
     /**
      * Gets the value for the current Instance.
      * If accessed within an Interaction, registers the property as a dependency.
@@ -30,9 +32,9 @@ class PropertyAccess<T>(private val defaultValue: T) {
         // --- Access the central state store in Instance ---
         // Use computeIfAbsent for atomicity and default value handling.
         // The key is the KProperty itself.
-        val value = currentInstance.instanceState.computeIfAbsent(property) {
+        val value = currentInstance.instanceState.computeIfAbsent(getFullPropertyName(property)) {
             println("[${currentInstance.instanceId}] Using default value for ${getFullPropertyName(property)}")
-            defaultValue // Use the property-specific default
+            ReadOnlyEncodingProxy.fromDecoded(defaultValue, property) // Use the property-specific default
         }
 
         // --- Crucial Type Cast ---
@@ -41,7 +43,7 @@ class PropertyAccess<T>(private val defaultValue: T) {
         // Serialization/deserialization must ensure type correctness when loading state.
         try {
             @Suppress("UNCHECKED_CAST") // Justification: Internal DSL consistency ensures correct type stored by setValue
-            return value as T
+            return value.getValue(thisRef, property) as T
         } catch (e: ClassCastException) {
             // This indicates a potential bug or corrupted state (e.g., bad deserialization)
             throw IllegalStateException("Type mismatch for property ${getFullPropertyName(property)} in instance ${currentInstance.instanceId}. Expected ${defaultValue!!::class.simpleName} but found ${value?.let { it::class.simpleName } ?: "null"}.",
@@ -71,7 +73,7 @@ class PropertyAccess<T>(private val defaultValue: T) {
         // --- Update the central state store in Instance ---
         // The KProperty is the key, newValue (of type T, stored as Any?) is the value.
         // ConcurrentHashMap put is thread-safe.
-        currentInstance.instanceState.put(property, newValue)
+        currentInstance.instanceState.put(getFullPropertyName(property), ReadOnlyEncodingProxy.fromDecoded(newValue, property))
 
         // Notify the instance that this property has changed.
         currentInstance.notifyUpdate(property)
@@ -87,5 +89,5 @@ open class Store {
      * Delegate function to create an ingredient property.
      * @param initialValue The default value for the ingredient in new Instances.
      */
-    protected fun <T> ingredient(initialValue: T) = PropertyAccess(initialValue)
+    protected fun <T> ingredient(initialValue: T) = Ingredient(initialValue)
 }

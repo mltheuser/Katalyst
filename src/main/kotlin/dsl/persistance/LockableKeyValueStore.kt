@@ -1,6 +1,5 @@
 package dsl.persistance
 
-import dsl.components.Instance
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
 
@@ -14,9 +13,9 @@ interface LockableKeyValueStore {
 
     suspend fun exists(key: String): Result<Boolean>
 
-    suspend fun get(key: String, lockHandle: LockHandle): Result<Instance>
+    suspend fun get(key: String, lockHandle: LockHandle): Result<String>
 
-    suspend fun set(key: String, value: Instance, lockHandle: LockHandle): Result<Unit>
+    suspend fun set(key: String, value: String, lockHandle: LockHandle): Result<Unit>
 
     suspend fun delete(key: String, lockHandle: LockHandle): Result<Unit>
 }
