@@ -3,7 +3,7 @@ package dsl.persistance
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
 
-data class LockHandle(internal val key: String)
+data class LockHandle(internal val id: String)
 
 interface LockableKeyValueStore {
 

@@ -1,7 +1,10 @@
+import com.redis.testcontainers.RedisContainer
 import dsl.components.Store
 import dsl.components.createInstance
 import dsl.components.findInstance
 import dsl.components.interaction
+import dsl.persistance.Persistence
+import dsl.persistance.PersistenceConfig
 import io.ktor.http.*
 import io.ktor.serialization.kotlinx.json.*
 import io.ktor.server.application.*
@@ -13,6 +16,7 @@ import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
 import kotlinx.serialization.Serializable
+import org.testcontainers.utility.DockerImageName
 import java.util.*
 import kotlin.time.Duration.Companion.hours
 
@@ -66,6 +70,13 @@ data class SubmitResponse(val message: String, val items: List<String>)
 
 
 fun main() {
+
+    val mappedPort = startRedisContainer()
+
+    Persistence.configure(PersistenceConfig.Redis(
+        port = mappedPort,
+    ))
+
     println("Starting Ktor server for Shopping Cart...")
     embeddedServer(Netty, port = 8080, host = "0.0.0.0") {
         // Install JSON Content Negotiation
@@ -196,4 +207,29 @@ fun main() {
             }
         }
     }.start(wait = true) // Start server and block main thread
+}
+
+fun startRedisContainer(): Int {
+    // 1. Setup and Start Redis Container
+    val redisImageName = "redis:7-alpine"
+    val exposedPort = 6379
+
+    val redisContainer = RedisContainer(DockerImageName.parse(redisImageName)).apply {
+        withExposedPorts(exposedPort)
+    }
+
+    // Use a shutdown hook or try-finally to ensure the container stops
+    Runtime.getRuntime().addShutdownHook(Thread {
+        println("Shutting down Redis container...")
+        redisContainer.stop()
+        println("Redis container stopped.")
+    })
+
+    println("Starting Redis container ($redisImageName)...")
+    redisContainer.start()
+
+    val mappedPort = redisContainer.getMappedPort(exposedPort)
+    println("Redis container started on ${redisContainer.host}:${redisContainer.getMappedPort(exposedPort)}")
+
+    return mappedPort!!
 }

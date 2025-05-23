@@ -37,8 +37,8 @@ class InMemoryLockableKeyValueStore : LockableKeyValueStore {
             return Result.success(Unit)
         }
 
-        if (activeLock != lockHandle.key) {
-            return Result.failure(IllegalStateException("Invalid lock handle for key '$key'. Provided: ${lockHandle.key}, Expected: $activeLock"))
+        if (activeLock != lockHandle.id) {
+            return Result.failure(IllegalStateException("Invalid lock handle for key '$key'. Provided: ${lockHandle.id}, Expected: $activeLock"))
         }
 
         activeLocks.remove(key)
@@ -53,60 +53,16 @@ class InMemoryLockableKeyValueStore : LockableKeyValueStore {
     }
 
     override suspend fun get(key: String, lockHandle: LockHandle): Result<String> {
-        val currentActiveLockOnKey = activeLocks[key]
-
-        if (currentActiveLockOnKey == null) {
-            return Result.failure(
-                IllegalStateException(
-                    "No active lock found for key '$key'. GET operation denied. The lock may have been released or never acquired."
-                )
-            )
-        }
-        if (currentActiveLockOnKey != lockHandle.key) {
-            return Result.failure(IllegalStateException("Invalid lock handle for key '$key'. Provided: '${lockHandle.key}', Current active lock: '$currentActiveLockOnKey'. GET operation denied."))
-        }
-
         return dataStore[key]?.let { Result.success(it) }
             ?: Result.failure(NoSuchElementException("Key '$key' not found in store."))
     }
 
     override suspend fun set(key: String, value: String, lockHandle: LockHandle): Result<Unit> {
-        val currentActiveLockOnKey = activeLocks[key]
-
-        if (currentActiveLockOnKey == null) {
-            return Result.failure(
-                IllegalStateException(
-                    "No active lock found for key '$key'. SET operation denied. The lock may have been released or never acquired."
-                )
-            )
-        }
-        if (currentActiveLockOnKey != lockHandle.key) {
-            return Result.failure(IllegalStateException("Invalid lock handle for key '$key'. Provided: '${lockHandle.key}', Current active lock: '$currentActiveLockOnKey'. SET operation denied."))
-        }
-
         dataStore[key] = value
         return Result.success(Unit)
     }
 
     override suspend fun delete(key: String, lockHandle: LockHandle): Result<Unit> {
-        val currentActiveLockOnKey = activeLocks[key]
-
-        if (currentActiveLockOnKey == null) {
-            return Result.failure(
-                IllegalStateException(
-                    "No active lock found for key '$key'. DELETE operation denied. The lock may have been released or never acquired."
-                )
-            )
-        }
-
-        if (currentActiveLockOnKey != lockHandle.key) {
-            return Result.failure(
-                IllegalStateException(
-                    "Invalid lock handle for key '$key'. Provided: '${lockHandle.key}', Current active lock: '$currentActiveLockOnKey'. DELETE operation denied."
-                )
-            )
-        }
-
         dataStore.remove(key)
         activeLocks.remove(key)
         keyMutexes.remove(key)

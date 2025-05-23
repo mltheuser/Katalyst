@@ -168,7 +168,8 @@ class InstanceCache(
     ) {
         val record = InstanceRecord.fromInstance(instance)
         Persistence.store.set(instance.instanceId, record.toString(), lockHandle)
-        println("[$instanceId] Persisted.")
+            .onSuccess { println("[$instanceId] Persisted.") }
+            .onFailure { println("[$instanceId] Failed to persist. ${it.message}")}
     }
 }
 
@@ -372,18 +373,13 @@ class InstanceHandle(
      * Provides a scope function `instance { ... }` syntax.
      * Ensures the code block executes within the context of this specific Instance.
      */
-    suspend operator fun invoke(block: suspend Instance.() -> Unit): Result<Unit> {
-        try {
-            withInstance(instanceId) { instanceReference ->
-                instanceReference.use { ref ->
-                    ref.instance {
-                        block()
-                    }
+    suspend operator fun invoke(block: suspend Instance.() -> Unit) {
+        withInstance(instanceId) { instanceReference ->
+            instanceReference.use { ref ->
+                ref.instance {
+                    block()
                 }
             }
-            return Result.success(Unit)
-        } catch (t: Throwable) {
-            return Result.failure(t)
         }
     }
 }
