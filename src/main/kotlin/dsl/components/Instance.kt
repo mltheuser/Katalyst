@@ -15,7 +15,7 @@ import kotlin.time.Duration
 suspend fun createInstance(
     instanceId: String, interactions: Set<Interaction> = emptySet(), expiresAfter: Duration = Duration.INFINITE
 ): InstanceHandle {
-    val instance = Instance(instanceId, interactions)
+    val instance = Instance(instanceId, interactions, expiresAfter)
     Instance.instanceCache.register(instance)
     return InstanceHandle(instanceId)
 }
@@ -37,8 +37,16 @@ data class PropertyUpdate<T>(
  * work queue, and execution lifecycle independently of other instances.
  */
 class Instance(
-    val instanceId: String, internal val interactions: Set<Interaction>
+    val instanceId: String, internal val interactions: Set<Interaction>, val expiresAfter: Duration
 ) {
+
+    init {
+        // Validate expiration duration
+        if (expiresAfter.isNegative()) {
+            throw IllegalArgumentException("expiresAfter must be a positive duration.")
+        }
+    }
+
     // --- Companion Object for Registry ---
     companion object {
         // Create a dedicated CoroutineScope for the InstanceCache.

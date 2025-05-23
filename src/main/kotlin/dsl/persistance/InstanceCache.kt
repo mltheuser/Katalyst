@@ -16,6 +16,7 @@ import java.util.concurrent.locks.ReentrantLock
 import kotlin.concurrent.withLock
 import kotlin.reflect.KProperty
 import kotlin.reflect.KType
+import kotlin.time.Duration
 
 
 class InstanceCacheEntry(
@@ -144,7 +145,7 @@ class InstanceCache(
             interaction
         }.toSet()
 
-        val instance = Instance(instanceId, interactions)
+        val instance = Instance(instanceId, interactions, instanceRecord.expiresAfter)
         instance.initialRunPerformed = instanceRecord.initialRunPerformed
         instance.instanceState.putAll(
             instanceRecord.instanceState.mapValues { ReadOnlyEncodingProxy.fromJson(it.value) })
@@ -167,9 +168,9 @@ class InstanceCache(
         instanceId: String, instance: Instance, lockHandle: LockHandle
     ) {
         val record = InstanceRecord.fromInstance(instance)
-        Persistence.store.set(instance.instanceId, record.toString(), lockHandle)
+        Persistence.store.set(instance.instanceId, record.toString(), lockHandle, instance.expiresAfter)
             .onSuccess { println("[$instanceId] Persisted.") }
-            .onFailure { println("[$instanceId] Failed to persist. ${it.message}")}
+            .onFailure { println("[$instanceId] Failed to persist. ${it.message}") }
     }
 }
 
@@ -314,8 +315,7 @@ class ReadOnlyEncodingProxy(
 
             // Helper function for type-safe encoding with the KSerializer<*>
             @Suppress("UNCHECKED_CAST") fun <ActualT> internalEncode(
-                serializer: KSerializer<ActualT>,
-                value: Any?
+                serializer: KSerializer<ActualT>, value: Any?
             ): String {
                 return Json.encodeToString(serializer, value as ActualT)
             }
@@ -339,21 +339,26 @@ class InteractionRecord(
 @Serializable
 class InstanceRecord(
     val instanceState: Map<String, String>,
+    val interactionRecords: List<InteractionRecord>,
+
     val initialRunPerformed: Boolean,
-    val interactionRecords: List<InteractionRecord>
+    val expiresAfter: Duration,
 ) {
     companion object {
         fun fromInstance(instance: Instance): InstanceRecord {
             return InstanceRecord(
                 instanceState = instance.instanceState.mapValues { it.value.getEncodedValue() },
-                initialRunPerformed = instance.initialRunPerformed,
                 interactionRecords = instance.interactions.map { interaction ->
                     InteractionRecord(
                         interaction.name,
                         interaction.dependencies,
                         interaction.targets,
                     )
-                })
+                },
+
+                initialRunPerformed = instance.initialRunPerformed,
+                expiresAfter = instance.expiresAfter,
+            )
         }
 
         fun fromString(jsonString: String): InstanceRecord {

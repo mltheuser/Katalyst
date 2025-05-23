@@ -19,6 +19,7 @@ import kotlinx.serialization.Serializable
 import org.testcontainers.utility.DockerImageName
 import java.util.*
 import kotlin.time.Duration.Companion.hours
+import kotlin.time.Duration.Companion.minutes
 
 
 // --- Shopping Cart Application ---
@@ -71,11 +72,9 @@ data class SubmitResponse(val message: String, val items: List<String>)
 
 fun main() {
 
-    val mappedPort = startRedisContainer()
+    // val mappedPort = startRedisContainer()
 
-    Persistence.configure(PersistenceConfig.Redis(
-        port = mappedPort,
-    ))
+    Persistence.configure(PersistenceConfig.InMemory)
 
     println("Starting Ktor server for Shopping Cart...")
     embeddedServer(Netty, port = 8080, host = "0.0.0.0") {
@@ -98,7 +97,7 @@ fun main() {
                 println("Received request to create cart. Generating ID: $cartId")
 
                 // --- Directly call suspend functions ---
-                createInstance(cartId, cartRecipe, expiresAfter = 12.hours)
+                createInstance(cartId, cartRecipe, expiresAfter = 3.minutes)
 
                 // call.respond is a suspend function, call it directly
                 call.respond(HttpStatusCode.Created, CreateCartResponse(cartId))

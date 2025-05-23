@@ -5,6 +5,7 @@ import org.redisson.Redisson
 import org.redisson.api.RPermitExpirableSemaphore
 import org.redisson.api.RedissonClient
 import org.redisson.config.Config
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
 import kotlin.time.Duration
@@ -14,6 +15,10 @@ class RedisLockableKeyValueStore(
 ) : LockableKeyValueStore {
 
     private val redisson: RedissonClient
+
+    // Tracks active locks: internalLockName -> permitId
+    // Using ConcurrentHashMap for thread-safety as lock/unlock can be called concurrently
+    private val activeLocks = ConcurrentHashMap<String, String>()
 
     companion object {
         private const val LOCK_NAMESPACE_PREFIX = "dslock:" // Namespace for lock keys
@@ -31,6 +36,33 @@ class RedisLockableKeyValueStore(
         config.password?.let { singleServerConfig.setPassword(it) }
 
         this.redisson = Redisson.create(redissonCfg)
+
+        // Register a shutdown hook to release locks and shutdown Redisson
+        Runtime.getRuntime().addShutdownHook(Thread {
+            println("RedisLockableKeyValueStore: Shutdown hook triggered. Releasing active locks...")
+            // Use a set of keys to avoid ConcurrentModificationException if iterating and modifying
+            val lockKeysToRelease = activeLocks.keys.toSet()
+            lockKeysToRelease.forEach { internalLockName ->
+                activeLocks[internalLockName]?.let { permitId ->
+                    try {
+                        val semaphore: RPermitExpirableSemaphore =
+                            redisson.getPermitExpirableSemaphore(internalLockName)
+                        // Use blocking release in shutdown hook as it's not a coroutine context
+                        semaphore.release(permitId)
+                    } catch (e: Exception) {
+                        // Log error, but continue trying to release other locks and shutdown Redisson
+                        System.err.println("RedisLockableKeyValueStore: Error releasing lock '$internalLockName' during shutdown: ${e.message}")
+                    }
+                }
+            }
+            activeLocks.clear() // Clear the map after attempting release
+
+            println("RedisLockableKeyValueStore: Shutting down Redisson client...")
+            if (!redisson.isShutdown && !redisson.isShuttingDown) {
+                redisson.shutdown()
+                println("RedisLockableKeyValueStore: Redisson client shut down.")
+            }
+        })
     }
 
     private fun getInternalLockName(key: String) = "$LOCK_NAMESPACE_PREFIX$key"
@@ -60,8 +92,9 @@ class RedisLockableKeyValueStore(
             ).asDeferred().await()
 
             if (permitId != null) {
-                // Successfully acquired a permit. Return LockHandle containing the permit ID.
-                Result.success(LockHandle(permitId))
+                // Successfully acquired a permit.
+                activeLocks[internalLockName] = permitId // Track the acquired lock
+                Result.success(LockHandle(permitId)) //  Return LockHandle containing the permit ID.
             } else {
                 // Timeout occurred before a permit could be acquired.
                 Result.failure(
@@ -83,6 +116,8 @@ class RedisLockableKeyValueStore(
         val internalLockName = getInternalLockName(key)
         val semaphore: RPermitExpirableSemaphore = redisson.getPermitExpirableSemaphore(internalLockName)
         val permitId = lockHandle.id // The permit ID obtained from a successful lock() call.
+
+        activeLocks.remove(internalLockName, permitId) // Remove no matter the outcome of release with redis
 
         return try {
             semaphore.releaseAsync(permitId).asDeferred().await()
@@ -130,12 +165,16 @@ class RedisLockableKeyValueStore(
         }
     }
 
-    override suspend fun set(key: String, value: String, lockHandle: LockHandle): Result<Unit> {
+    override suspend fun set(key: String, value: String, lockHandle: LockHandle, timeToLife: Duration): Result<Unit> {
         val internalDataKey = getInternalDataKey(key)
         // Note: Assumes valid lockHandle.
         val bucket = redisson.getBucket<String>(internalDataKey)
         return try {
-            bucket.setAsync(value).await() // Use async version
+            if (timeToLife.isInfinite()) {
+                bucket.setAsync(value).asDeferred().await()
+            } else {
+                bucket.setAsync(value, timeToLife.inWholeMilliseconds, TimeUnit.MILLISECONDS).asDeferred().await()
+            }
             Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(RuntimeException("Error setting key '$key' (data key: $internalDataKey): ${e.message}", e))

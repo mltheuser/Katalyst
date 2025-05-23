@@ -15,7 +15,7 @@ interface LockableKeyValueStore {
 
     suspend fun get(key: String, lockHandle: LockHandle): Result<String>
 
-    suspend fun set(key: String, value: String, lockHandle: LockHandle): Result<Unit>
+    suspend fun set(key: String, value: String, lockHandle: LockHandle, expiresAfter: Duration): Result<Unit>
 
     suspend fun delete(key: String, lockHandle: LockHandle): Result<Unit>
 }
