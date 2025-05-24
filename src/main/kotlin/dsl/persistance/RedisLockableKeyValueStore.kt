@@ -4,11 +4,13 @@ import kotlinx.coroutines.future.asDeferred
 import org.redisson.Redisson
 import org.redisson.api.RPermitExpirableSemaphore
 import org.redisson.api.RedissonClient
+import org.redisson.api.options.KeysScanOptions
 import org.redisson.config.Config
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
 import kotlin.time.Duration
+
 
 class RedisLockableKeyValueStore(
     private val config: PersistenceConfig.Redis // Store config to access its properties later
@@ -27,10 +29,8 @@ class RedisLockableKeyValueStore(
 
     init {
         val redissonCfg = Config()
-        val singleServerConfig = redissonCfg.useSingleServer()
-            .setAddress("redis://${config.host}:${config.port}")
-            .setDatabase(config.database)
-            .setConnectTimeout(config.connectionTimeoutMillis.toInt())
+        val singleServerConfig = redissonCfg.useSingleServer().setAddress("redis://${config.host}:${config.port}")
+            .setDatabase(config.database).setConnectTimeout(config.connectionTimeoutMillis.toInt())
             .setTimeout(config.commandTimeoutMillis.toInt())
 
         config.password?.let { singleServerConfig.setPassword(it) }
@@ -67,6 +67,7 @@ class RedisLockableKeyValueStore(
 
     private fun getInternalLockName(key: String) = "$LOCK_NAMESPACE_PREFIX$key"
     private fun getInternalDataKey(key: String) = "$DATA_NAMESPACE_PREFIX$key"
+    private fun getInternalDataKeyReversal(internalKey: String) = internalKey.removePrefix(DATA_NAMESPACE_PREFIX)
 
     override suspend fun lock(key: String, timeout: Duration): Result<LockHandle> {
         val internalLockName = getInternalLockName(key)
@@ -105,8 +106,7 @@ class RedisLockableKeyValueStore(
             // Handle exceptions from Redisson (e.g., connection issues) or other unexpected errors.
             Result.failure(
                 RuntimeException(
-                    "Error acquiring lock for key '$key' (lock name: $internalLockName): ${e.message}",
-                    e
+                    "Error acquiring lock for key '$key' (lock name: $internalLockName): ${e.message}", e
                 )
             )
         }
@@ -125,8 +125,7 @@ class RedisLockableKeyValueStore(
         } catch (e: Exception) {
             Result.failure(
                 RuntimeException(
-                    "Error releasing lock for key '$key' (lock name: $internalLockName): ${e.message}",
-                    e
+                    "Error releasing lock for key '$key' (lock name: $internalLockName): ${e.message}", e
                 )
             )
         }
@@ -141,8 +140,7 @@ class RedisLockableKeyValueStore(
         } catch (e: Exception) {
             Result.failure(
                 RuntimeException(
-                    "Error checking existence for key '$key' (data key: $internalDataKey): ${e.message}",
-                    e
+                    "Error checking existence for key '$key' (data key: $internalDataKey): ${e.message}", e
                 )
             )
         }
@@ -179,6 +177,15 @@ class RedisLockableKeyValueStore(
         } catch (e: Exception) {
             Result.failure(RuntimeException("Error setting key '$key' (data key: $internalDataKey): ${e.message}", e))
         }
+    }
+
+    override suspend fun findKeysByPattern(pattern: String): Result<Iterator<String>> {
+        val internalPattern = getInternalDataKey(pattern)
+        val internalKeyIterator = redisson.keys.getKeys(KeysScanOptions.defaults().pattern(internalPattern))
+
+        val keyIterator = internalKeyIterator.map { internalKey -> getInternalDataKeyReversal(internalKey) }
+
+        return Result.success(keyIterator.iterator())
     }
 
     override suspend fun delete(key: String, lockHandle: LockHandle): Result<Unit> {

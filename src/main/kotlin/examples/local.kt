@@ -59,9 +59,9 @@ fun main() {
         // 3. Bake instances of the recipe. Each gets its own state and lifecycle.
         println("--- Starting Instance 1 ---")
         // Baking creates the instance and schedules its initial run (executing all interactions once).
-        val instance1 = createInstance("recipe1", interactions)
+        val instance1 = createInstance("recipe1", interactions).getOrThrow()
         println("--- Starting Instance 2 ---")
-        val instance2 = createInstance("recipe2", interactions)
+        val instance2 = createInstance("recipe2", interactions).getOrThrow()
 
         println("\n--- Modifying Instance 1 ---")
         // Use the instance invoke operator to scope operations to instance1.

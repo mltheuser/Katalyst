@@ -17,5 +17,7 @@ interface LockableKeyValueStore {
 
     suspend fun set(key: String, value: String, lockHandle: LockHandle, expiresAfter: Duration): Result<Unit>
 
+    suspend fun findKeysByPattern(pattern: String): Result<Iterator<String>>
+
     suspend fun delete(key: String, lockHandle: LockHandle): Result<Unit>
 }

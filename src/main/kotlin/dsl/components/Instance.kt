@@ -14,17 +14,26 @@ import kotlin.time.Duration
 
 suspend fun createInstance(
     instanceId: String, interactions: Set<Interaction> = emptySet(), expiresAfter: Duration = Duration.INFINITE
-): InstanceHandle {
+): Result<InstanceHandle> {
     val instance = Instance(instanceId, interactions, expiresAfter)
-    Instance.instanceCache.register(instance)
-    return InstanceHandle(instanceId)
+    return Instance.instanceCache.register(instance).map {
+        InstanceHandle(instanceId)
+    }
 }
 
-suspend fun String.findInstance(): Result<InstanceHandle> {
+suspend fun String.lookupInstance(): Result<InstanceHandle> {
     if (Persistence.store.exists(this).getOrThrow()) {
         return Result.success(InstanceHandle(this))
     }
     return Result.failure(IllegalStateException("No instance with identifier ($this) exists."))
+}
+
+suspend fun findInstances(pattern: String): Result<Iterator<InstanceHandle>> {
+    val matchingKeysResult: Result<Iterator<String>> = Persistence.store.findKeysByPattern(pattern)
+
+    return matchingKeysResult.map { stringIterator ->
+        stringIterator.asSequence().map { instanceId -> InstanceHandle(instanceId) }.iterator()
+    }
 }
 
 data class PropertyUpdate<T>(

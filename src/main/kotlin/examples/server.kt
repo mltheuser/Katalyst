@@ -1,8 +1,5 @@
 import com.redis.testcontainers.RedisContainer
-import dsl.components.Store
-import dsl.components.createInstance
-import dsl.components.findInstance
-import dsl.components.interaction
+import dsl.components.*
 import dsl.persistance.Persistence
 import dsl.persistance.PersistenceConfig
 import io.ktor.http.*
@@ -18,7 +15,6 @@ import io.ktor.server.routing.*
 import kotlinx.serialization.Serializable
 import org.testcontainers.utility.DockerImageName
 import java.util.*
-import kotlin.time.Duration.Companion.hours
 import kotlin.time.Duration.Companion.minutes
 
 
@@ -72,9 +68,13 @@ data class SubmitResponse(val message: String, val items: List<String>)
 
 fun main() {
 
-    // val mappedPort = startRedisContainer()
+    val mappedPort = startRedisContainer()
 
-    Persistence.configure(PersistenceConfig.InMemory)
+    Persistence.configure(
+        PersistenceConfig.Redis(
+            port = mappedPort,
+        )
+    )
 
     println("Starting Ktor server for Shopping Cart...")
     embeddedServer(Netty, port = 8080, host = "0.0.0.0") {
@@ -93,11 +93,11 @@ fun main() {
         routing {
             // Endpoint to create a new shopping cart
             post("/cart/create") { // The block here is already a suspend lambda
-                val cartId = UUID.randomUUID().toString()
+                val cartId = "cart-" + UUID.randomUUID().toString()
                 println("Received request to create cart. Generating ID: $cartId")
 
                 // --- Directly call suspend functions ---
-                createInstance(cartId, cartRecipe, expiresAfter = 3.minutes)
+                createInstance(cartId, cartRecipe, expiresAfter = 10.minutes)
 
                 // call.respond is a suspend function, call it directly
                 call.respond(HttpStatusCode.Created, CreateCartResponse(cartId))
@@ -124,7 +124,7 @@ fun main() {
                 val itemName = request.itemName
                 println("[$cartId] Received request to add item: '$itemName'")
 
-                val cartInstance = cartId.findInstance().getOrThrow()
+                val cartInstance = cartId.lookupInstance().getOrThrow()
 
                 var addSuccessful = false
                 // Execute modifications within the specific cart's instance context
@@ -161,7 +161,7 @@ fun main() {
                     return@post
                 }
 
-                val cartInstance = cartId.findInstance().getOrThrow()
+                val cartInstance = cartId.lookupInstance().getOrThrow()
 
                 println("[$cartId] Received request to submit order.")
 
@@ -203,6 +203,41 @@ fun main() {
                         SubmitResponse("Order for cart '$cartId' submitted successfully.", finalItems)
                     )
                 }
+            }
+
+            // Endpoint to get a summary of all items across all active shopping carts
+            get("/cart/summary") { // Changed to GET and a more appropriate path
+                val itemsOrdered = mutableMapOf<String, Int>()
+
+                // findInstances returns Result<List<RecipeInstanceContext<*>>>
+                // We need to handle success and failure of this operation
+                findInstances("cart-*")
+                    .onSuccess { instances ->
+                        instances.forEach { instanceContext ->
+                            // Execute code within the context of each found instance
+                            // This lambda has access to CartStore specific to 'instanceContext'
+                            instanceContext {
+                                val currentInstanceId = this.instanceId // Capture for logging
+                                if (CartStore.status != CartStatus.SUBMITTED) {
+                                    return@instanceContext
+                                }
+                                val itemsInCart = CartStore.items
+                                println("[$currentInstanceId] Processing items for summary: $itemsInCart")
+                                itemsInCart.forEach { item ->
+                                    itemsOrdered[item] = itemsOrdered.getOrDefault(item, 0) + 1
+                                }
+                            }
+                        }
+                        // Successfully aggregated items
+                        println("Cart Summary Report: $itemsOrdered")
+                        call.respond(HttpStatusCode.OK, itemsOrdered) // kotlinx.serialization handles Map<String, Int>
+                    }
+                    .onFailure { error ->
+                        // Log the error and respond appropriately
+                        System.err.println("Error fetching cart instances for summary: ${error.message}")
+                        error.printStackTrace() // For more detailed logging
+                        call.respond(HttpStatusCode.InternalServerError, "Failed to generate cart summary: ${error.message}")
+                    }
             }
         }
     }.start(wait = true) // Start server and block main thread

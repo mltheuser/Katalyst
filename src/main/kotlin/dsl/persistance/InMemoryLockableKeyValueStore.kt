@@ -5,6 +5,7 @@ import kotlinx.coroutines.sync.Mutex
 import java.util.*
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeoutException
+import java.util.regex.PatternSyntaxException
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.minutes
 
@@ -13,8 +14,7 @@ class InMemoryLockableKeyValueStore : LockableKeyValueStore {
     internal val cleanupInterval = 1.minutes
 
     private class CacheEntry(
-        val value: String,
-        expiresAfter: Duration
+        val value: String, expiresAfter: Duration
     ) {
 
         val expiresAtMillis: Long
@@ -114,6 +114,58 @@ class InMemoryLockableKeyValueStore : LockableKeyValueStore {
     override suspend fun set(key: String, value: String, lockHandle: LockHandle, expiresAfter: Duration): Result<Unit> {
         dataStore[key] = CacheEntry(value, expiresAfter)
         return Result.success(Unit)
+    }
+
+    override suspend fun findKeysByPattern(pattern: String): Result<Iterator<String>> = try {
+        // 1. Construct the regex pattern correctly.
+        //    The user's `pattern` string uses '*' as a wildcard for 'any sequence of zero or more characters'.
+        //    Other characters, including regex metacharacters (e.g., '.', '+', '?'), should be treated literally.
+
+        //    Split the pattern by our wildcard character '*'.
+        val parts = pattern.split('*')
+
+        //    Escape each part to ensure any regex metacharacters within them are treated literally.
+        //    For example, if pattern is "config*.ini", parts are "config" and ".ini".
+        //    Regex.escape(".ini") becomes "\\.ini".
+        val escapedParts = parts.map { Regex.escape(it) }
+
+        //    Join the escaped parts with '.*' which is the regex equivalent of our wildcard.
+        //    If pattern was "a*b*c":
+        //    parts = ["a", "b", "c"]
+        //    escapedParts = ["a", "b", "c"] (assuming a,b,c are not regex meta)
+        //    regexPatternText = "a.*b.*c"
+        //
+        //    If pattern was "*key*":
+        //    parts = ["", "key", ""]
+        //    escapedParts = ["", "key", ""]
+        //    regexPatternText = ".*key.*"
+        //
+        //    If pattern was "file.name*":
+        //    parts = ["file.name", ""]
+        //    escapedParts = ["file\\.name", ""] (Regex.escape("file.name") -> "file\\.name")
+        //    regexPatternText = "file\\.name.*"
+        val regexPatternText = escapedParts.joinToString(separator = ".*")
+
+        //    Anchor the pattern to match the whole key string.
+        val regex = Regex("^$regexPatternText$") // Ensure it matches the entire key
+
+        // 2. Iterate over current keys and filter.
+        //    dataStore.keys provides a KeySetView. Iterating it is weakly consistent.
+        //    Filtering and then collecting to a list provides a snapshot of matching keys.
+        val matchingKeys = dataStore.keys.asSequence().filter { key ->
+            val entry = dataStore[key] // Check for concurrent removal
+            val isMatch = regex.matches(key)
+            entry != null && isMatch
+        }
+
+        // 3. Return an iterator over the collected matching keys.
+        Result.success(matchingKeys.iterator())
+    } catch (e: PatternSyntaxException) {
+        // This can be thrown by Regex(pattern) if the constructed pattern is somehow invalid,
+        // though our construction method should be safe.
+        Result.failure(IllegalArgumentException("Invalid pattern syntax generated from '$pattern'. Error: ${e.message}", e))
+    } catch (e: Exception) { // Catch any other unexpected errors during the process
+        Result.failure(RuntimeException("Failed to find keys by pattern '$pattern'. Error: ${e.message}", e))
     }
 
     override suspend fun delete(key: String, lockHandle: LockHandle): Result<Unit> {

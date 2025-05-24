@@ -378,8 +378,8 @@ class InstanceHandle(
      * Provides a scope function `instance { ... }` syntax.
      * Ensures the code block executes within the context of this specific Instance.
      */
-    suspend operator fun invoke(block: suspend Instance.() -> Unit) {
-        withInstance(instanceId) { instanceReference ->
+    suspend operator fun invoke(block: suspend Instance.() -> Unit): Result<Unit> {
+        return withInstance(instanceId) { instanceReference ->
             instanceReference.use { ref ->
                 ref.instance {
                     block()
@@ -389,8 +389,10 @@ class InstanceHandle(
     }
 }
 
-suspend fun withInstance(instanceId: String, block: suspend (instanceReference: InstanceReference) -> Unit) {
-    val instanceReferenceResult = Instance.instanceCache.lookup(instanceId)
-    val instanceReference = instanceReferenceResult.getOrThrow()
-    return block(instanceReference)
+suspend fun withInstance(
+    instanceId: String, block: suspend (instanceReference: InstanceReference) -> Unit
+): Result<Unit> {
+    return Instance.instanceCache.lookup(instanceId).map { instanceReference ->
+        block(instanceReference)
+    }
 }

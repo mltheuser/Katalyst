@@ -33,5 +33,10 @@
         curl -X POST -H "Content-Type: application/json" -d '{"itemName": "orange"}' http://localhost:8080/cart/YOUR_CART_ID/add
         ```
         *   This should now return a `400 Bad Request` response with the message "Cart 'YOUR_CART_ID' has already been submitted."
+        * 
+    *  **Fetch all submitted ordered items**
+        ```bash
+        curl -X GET -H "Content-Type: application/json" http://localhost:8080/cart/summary
+        ```
 
 This example demonstrates how each cart (`RecipeInstance`) maintains its isolated state (`items`, `status`) via the `Store` and `PropertyAccess` delegates. The Ktor handlers interact with the correct instance using the `cartInstance { ... }` scope, ensuring thread safety and context propagation provided by the recipe framework.
