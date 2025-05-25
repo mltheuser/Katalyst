@@ -23,7 +23,7 @@ import kotlin.time.Duration.Companion.minutes
 // 1. Define Cart State using the Store
 enum class CartStatus { OPEN, PRIORITY, SUBMITTED }
 
-object CartStore {
+object Cart {
     // Ingredient holding the list of items in the cart for a specific instance
     var items by ingredient<List<String>>(emptyList())
 
@@ -35,16 +35,16 @@ object CartStore {
 val cartRecipe = setOf(
     // Example: An interaction that logs when items are added/removed or status changes.
     interaction("Log Cart Changes") {
-        val currentItems = CartStore.items // Dependency on items
-        val currentStatus = CartStore.status // Dependency on status
+        val currentItems = Cart.items // Dependency on items
+        val currentStatus = Cart.status // Dependency on status
         println("[$instanceId] Cart State Update: Status=$currentStatus, Items=$currentItems")
         // This interaction doesn't write (target) anything, just logs.
     },
 
     interaction("Monitor Cart Size") {
-        val currentItems = CartStore.items // Dependency on items
+        val currentItems = Cart.items // Dependency on items
         if (currentItems.size > 3) {
-            CartStore.status = CartStatus.PRIORITY
+            Cart.status = CartStatus.PRIORITY
 
             println("[$instanceId] Cart has enough items to reach priority: Items=$currentItems")
         }
@@ -130,15 +130,15 @@ fun main() {
                 // Execute modifications within the specific cart's instance context
                 cartInstance { // Sets RecipeContext for this block
                     // Check if cart is already submitted before adding
-                    if (CartStore.status == CartStatus.SUBMITTED) {
+                    if (Cart.status == CartStatus.SUBMITTED) {
                         println("[$cartId] Attempted to add item to already submitted cart.")
                         call.respond(HttpStatusCode.BadRequest, "Cart '$cartId' has already been submitted.")
                         // No need to awaitIdle here as no state was changed
                     } else {
                         // Read current items, add new one, and set the ingredient
-                        val currentItems = CartStore.items
+                        val currentItems = Cart.items
                         println("[$cartId] Current items: $currentItems. Adding '$itemName'")
-                        CartStore.items = currentItems + itemName // Setting triggers notifyUpdate -> runs interactions
+                        Cart.items = currentItems + itemName // Setting triggers notifyUpdate -> runs interactions
 
                         // Wait for the update (and logging interaction) to complete
                         awaitIdle()
@@ -170,22 +170,22 @@ fun main() {
 
                 // Execute submission logic within the instance context
                 cartInstance {
-                    if (CartStore.status == CartStatus.SUBMITTED) {
+                    if (Cart.status == CartStatus.SUBMITTED) {
                         println("[$cartId] Cart already submitted.")
-                        finalItems = CartStore.items // Get items anyway for response
+                        finalItems = Cart.items // Get items anyway for response
                         alreadySubmitted = true
                         // Don't change state, maybe don't even awaitIdle
                     } else {
                         println("[$cartId] Submitting order...")
-                        finalItems = CartStore.items // Get items before changing status
-                        CartStore.status = CartStatus.SUBMITTED // Setting triggers notifyUpdate
+                        finalItems = Cart.items // Get items before changing status
+                        Cart.status = CartStatus.SUBMITTED // Setting triggers notifyUpdate
 
                         // --- Simulate Receipt Generation ---
                         println("[$cartId] --- RECEIPT ---")
                         println("[$cartId] Cart ID: $instanceId")
                         println("[$cartId] Final Items (${finalItems.size}):")
                         finalItems.forEachIndexed { index, item -> println("[$cartId]   ${index + 1}. $item") }
-                        println("[$cartId] Status: ${CartStore.status}") // Should print SUBMITTED
+                        println("[$cartId] Status: ${Cart.status}") // Should print SUBMITTED
                         println("[$cartId] --- END RECEIPT ---")
                         // --- End Simulation ---
 
@@ -217,10 +217,10 @@ fun main() {
                         // This lambda has access to CartStore specific to 'instanceContext'
                         instanceContext {
                             val currentInstanceId = this.instanceId // Capture for logging
-                            if (CartStore.status != CartStatus.SUBMITTED) {
+                            if (Cart.status != CartStatus.SUBMITTED) {
                                 return@instanceContext
                             }
-                            val itemsInCart = CartStore.items
+                            val itemsInCart = Cart.items
                             println("[$currentInstanceId] Processing items for summary: $itemsInCart")
                             itemsInCart.forEach { item ->
                                 itemsOrdered[item] = itemsOrdered.getOrDefault(item, 0) + 1
