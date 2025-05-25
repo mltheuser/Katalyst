@@ -23,7 +23,7 @@ import kotlin.time.Duration.Companion.minutes
 // 1. Define Cart State using the Store
 enum class CartStatus { OPEN, PRIORITY, SUBMITTED }
 
-object CartStore : Store() {
+object CartStore {
     // Ingredient holding the list of items in the cart for a specific instance
     var items by ingredient<List<String>>(emptyList())
 
@@ -211,33 +211,33 @@ fun main() {
 
                 // findInstances returns Result<List<RecipeInstanceContext<*>>>
                 // We need to handle success and failure of this operation
-                findInstances("cart-*")
-                    .onSuccess { instances ->
-                        instances.forEach { instanceContext ->
-                            // Execute code within the context of each found instance
-                            // This lambda has access to CartStore specific to 'instanceContext'
-                            instanceContext {
-                                val currentInstanceId = this.instanceId // Capture for logging
-                                if (CartStore.status != CartStatus.SUBMITTED) {
-                                    return@instanceContext
-                                }
-                                val itemsInCart = CartStore.items
-                                println("[$currentInstanceId] Processing items for summary: $itemsInCart")
-                                itemsInCart.forEach { item ->
-                                    itemsOrdered[item] = itemsOrdered.getOrDefault(item, 0) + 1
-                                }
+                findInstances("cart-*").onSuccess { instances ->
+                    instances.forEach { instanceContext ->
+                        // Execute code within the context of each found instance
+                        // This lambda has access to CartStore specific to 'instanceContext'
+                        instanceContext {
+                            val currentInstanceId = this.instanceId // Capture for logging
+                            if (CartStore.status != CartStatus.SUBMITTED) {
+                                return@instanceContext
+                            }
+                            val itemsInCart = CartStore.items
+                            println("[$currentInstanceId] Processing items for summary: $itemsInCart")
+                            itemsInCart.forEach { item ->
+                                itemsOrdered[item] = itemsOrdered.getOrDefault(item, 0) + 1
                             }
                         }
-                        // Successfully aggregated items
-                        println("Cart Summary Report: $itemsOrdered")
-                        call.respond(HttpStatusCode.OK, itemsOrdered) // kotlinx.serialization handles Map<String, Int>
                     }
-                    .onFailure { error ->
-                        // Log the error and respond appropriately
-                        System.err.println("Error fetching cart instances for summary: ${error.message}")
-                        error.printStackTrace() // For more detailed logging
-                        call.respond(HttpStatusCode.InternalServerError, "Failed to generate cart summary: ${error.message}")
-                    }
+                    // Successfully aggregated items
+                    println("Cart Summary Report: $itemsOrdered")
+                    call.respond(HttpStatusCode.OK, itemsOrdered) // kotlinx.serialization handles Map<String, Int>
+                }.onFailure { error ->
+                    // Log the error and respond appropriately
+                    System.err.println("Error fetching cart instances for summary: ${error.message}")
+                    error.printStackTrace() // For more detailed logging
+                    call.respond(
+                        HttpStatusCode.InternalServerError, "Failed to generate cart summary: ${error.message}"
+                    )
+                }
             }
         }
     }.start(wait = true) // Start server and block main thread

@@ -1,7 +1,6 @@
 package dsl.components
 
 import dsl.persistance.ReadOnlyEncodingProxy
-import dsl.persistance.getSerializer
 import kotlin.reflect.KProperty
 
 
@@ -76,13 +75,7 @@ class Ingredient<T>(private val defaultValue: T) {
 }
 
 /**
- * Base class for defining data stores containing ingredients.
- * Provides the `ingredient` delegate function.
+ * Delegate function to create an ingredient property.
+ * @param initialValue The default value for the ingredient in new Instances.
  */
-open class Store {
-    /**
-     * Delegate function to create an ingredient property.
-     * @param initialValue The default value for the ingredient in new Instances.
-     */
-    protected fun <T> ingredient(initialValue: T) = Ingredient(initialValue)
-}
+fun <T> ingredient(initialValue: T) = Ingredient(initialValue)
