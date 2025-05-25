@@ -5,6 +5,7 @@ import dsl.components.createInstance
 import dsl.components.interaction
 import dsl.persistance.Persistence
 import dsl.persistance.PersistenceConfig
+import dsl.persistance.delete
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 
@@ -51,8 +52,7 @@ fun main() {
         interaction("On logs changed") {
             val currentLogs = MyStore.logs // Dependency
             println("[$instanceId] Got some new logs value: $currentLogs")
-        }
-    )
+        })
 
     // Use a parallel dispatcher for potentially concurrent instance processing.
     runBlocking(Dispatchers.Default) {
@@ -113,6 +113,12 @@ fun main() {
             visualize()
         }
         // instance2.visualize() // Would print the identical structure graph.
+
+        // delete instance
+        instance1.delete().onSuccess {
+            // Invocation should fail after successful deletion
+            instance1 {}
+        }
 
     } // End runBlocking
 

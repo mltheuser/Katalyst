@@ -128,7 +128,9 @@ class InstanceCache(
 
             return Result.success(InstanceReference(instance, newCacheEntry))
         } else {
-            return Result.failure(IllegalStateException("Instance $id was not found."))
+            return Result.failure(
+                IllegalStateException("Instance $id was not found. Probably because the instance was removed between acquisition of the instanceHandle and invocation.")
+            )
         }
 
     }
@@ -372,7 +374,7 @@ class InstanceRecord(
 }
 
 class InstanceHandle(
-    private val instanceId: String
+    internal val instanceId: String
 ) {
     /**
      * Provides a scope function `instance { ... }` syntax.
@@ -385,7 +387,19 @@ class InstanceHandle(
                     block()
                 }
             }
+        }.onFailure {
+            System.err.println("Instance operation failed for $instanceId: ${it.message}")
         }
+    }
+}
+
+suspend fun InstanceHandle.delete(): Result<Unit> {
+    return Persistence.store.lock(instanceId).map { lockHandle ->
+        Persistence.store.delete(instanceId, lockHandle).onFailure {
+            Persistence.store.unlock(instanceId, lockHandle)
+            return Result.failure(it)
+        }
+        Persistence.store.unlock(instanceId, lockHandle)
     }
 }
 
