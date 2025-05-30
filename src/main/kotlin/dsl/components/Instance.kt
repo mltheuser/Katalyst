@@ -13,9 +13,9 @@ import kotlin.reflect.KProperty
 import kotlin.time.Duration
 
 suspend fun createInstance(
-    instanceId: String, interactions: Set<Interaction> = emptySet(), expiresAfter: Duration = Duration.INFINITE
+    instanceId: String, reactions: Set<Reaction> = emptySet(), expiresAfter: Duration = Duration.INFINITE
 ): Result<InstanceHandle> {
-    val instance = Instance(instanceId, interactions, expiresAfter)
+    val instance = Instance(instanceId, reactions, expiresAfter)
     return Instance.instanceCache.register(instance).map {
         InstanceHandle(instanceId)
     }
@@ -46,7 +46,7 @@ data class PropertyUpdate<T>(
  * work queue, and execution lifecycle independently of other instances.
  */
 class Instance(
-    val instanceId: String, internal val interactions: Set<Interaction>, val expiresAfter: Duration
+    val instanceId: String, internal val reactions: Set<Reaction>, val expiresAfter: Duration
 ) {
 
     init {
@@ -79,7 +79,7 @@ class Instance(
      * Key: The KProperty object representing the ingredient (e.g., `MyStore::a`).
      * Value: The actual value of the ingredient (e.g., 10, "hello"), stored as Any?
      *
-     * Uses ConcurrentHashMap for thread-safety during concurrent interaction execution.
+     * Uses ConcurrentHashMap for thread-safety during concurrent Reaction execution.
      */
     internal val instanceState = ConcurrentHashMap<String, ReadOnlyEncodingProxy>()
 
@@ -93,7 +93,7 @@ class Instance(
     // Deferred completed when the worker becomes idle (no work pending).
     @Volatile private var idleDeferred = CompletableDeferred<Unit>().apply { complete(Unit) } // Start idle
 
-    // Ensures the initial run (processing all interactions) happens only once.
+    // Ensures the initial run (processing all Reactions) happens only once.
     var initialRunPerformed = false
 
     // Dedicated scope for this instance's coroutines, automatically propagating its InstanceContext.
@@ -134,15 +134,15 @@ class Instance(
 
     /**
      * The main loop of the background worker coroutine. Processes property updates
-     * from the workList and executes dependent interactions. Manages the idle state.
+     * from the workList and executes dependent Reactions. Manages the idle state.
      */
     private suspend fun processWorkList(performInitialRun: Boolean) {
         try {
             // Ensure InstanceContext is available throughout the worker's execution.
             withContext(InstanceContext.coroutineContextElement(this@Instance)) {
                 if (performInitialRun) {
-                    println("[$instanceId] Performing initial run (all interactions).")
-                    runIteration(null) // Null property triggers all interactions.
+                    println("[$instanceId] Performing initial run (all Reactions).")
+                    runIteration(null) // Null property triggers all Reactions.
                 }
 
                 // Process work items until the coroutine is cancelled.
@@ -209,8 +209,8 @@ class Instance(
     }
 
     /**
-     * Runs all interactions that depend on the given property.
-     * If the property is null, runs all interactions (initial run).
+     * Runs all Reactions that depend on the given property.
+     * If the property is null, runs all Reactions (initial run).
      */
     private suspend fun runIteration(update: PropertyUpdate<*>? = null) {
         // Apply update to instance state
@@ -222,33 +222,33 @@ class Instance(
             )
         }
 
-        // Find interactions where the updated property is a dependency, or all if property is null.
-        val dependentInteractions = interactions.filter { interaction ->
-            update == null || getFullPropertyName(update.property) in interaction.dependencies
+        // Find Reactions where the updated property is a dependency, or all if property is null.
+        val dependentReactions = reactions.filter { Reaction ->
+            update == null || getFullPropertyName(update.property) in Reaction.dependencies
         }
 
-        if (dependentInteractions.isNotEmpty()) {
+        if (dependentReactions.isNotEmpty()) {
             val type = if (update == null) "initial" else "update on ${getFullPropertyName(update.property)}"
-            println("[$instanceId] Running ${dependentInteractions.size} interactions for $type")
+            println("[$instanceId] Running ${dependentReactions.size} Reactions for $type")
 
-            // Run interactions concurrently within a child scope that inherits the Instance context.
+            // Run Reactions concurrently within a child scope that inherits the Instance context.
             coroutineScope {
-                dependentInteractions.forEach { interaction ->
-                    launch(CoroutineName("Interaction-${interaction.name}")) {
+                dependentReactions.forEach { Reaction ->
+                    launch(CoroutineName("Reaction-${Reaction.name}")) {
                         try {
-                            interaction.invoke() // Executes the interaction's logic + context setup.
+                            Reaction.invoke() // Executes the Reaction's logic + context setup.
                         } catch (e: Exception) {
-                            // Log errors within interactions. Consider more robust error handling/reporting.
-                            println("[$instanceId] Error in interaction '${interaction.name}': ${e.message}")
+                            // Log errors within Reactions. Consider more robust error handling/reporting.
+                            println("[$instanceId] Error in Reaction '${Reaction.name}': ${e.message}")
                             e.printStackTrace() // TODO: Replace with proper logging/error handling
                         }
                     }
                 }
             }
-            println("[$instanceId] Finished running interactions for $type")
+            println("[$instanceId] Finished running Reactions for $type")
         } else {
             val type = if (update == null) "initial" else "update on ${getFullPropertyName(update.property)}"
-            println("[$instanceId] No interactions to run for $type")
+            println("[$instanceId] No Reactions to run for $type")
         }
     }
 
@@ -283,14 +283,14 @@ class Instance(
     }
 
     /**
-     * Prints a simple textual visualization of the instance's interaction structure (interactions and data flow).
+     * Prints a simple textual visualization of the instance's Reaction structure (Reactions and data flow).
      * Note: This shows the static structure, not the current runtime state.
      */
     fun visualize() {
-        println("\n=== Interactions Graph for $instanceId ===")
-        val interactions = interactions
+        println("\n=== Reactions Graph for $instanceId ===")
+        val Reactions = reactions
         val allIngredients = mutableSetOf<String>()
-        interactions.forEach {
+        Reactions.forEach {
             allIngredients.addAll(it.dependencies)
             allIngredients.addAll(it.targets)
         }
@@ -298,24 +298,24 @@ class Instance(
         println("\nIngredients (Properties):")
         allIngredients.forEach { println("  * ${it}") }
 
-        println("\nInteractions:")
-        interactions.forEach { interaction ->
-            val name = interaction.name
-            val inputs = interaction.dependencies.joinToString(", ") { it }
-            val outputs = interaction.targets.joinToString(", ") { it }
+        println("\nReactions:")
+        Reactions.forEach { Reaction ->
+            val name = Reaction.name
+            val inputs = Reaction.dependencies.joinToString(", ") { it }
+            val outputs = Reaction.targets.joinToString(", ") { it }
             println("  * $name")
             println("    - Reads: ${if (inputs.isEmpty()) "none" else inputs}")
             println("    - Writes: ${if (outputs.isEmpty()) "none" else outputs}")
         }
 
         println("\nData Flow:")
-        interactions.forEach { interaction ->
-            val deps = interaction.dependencies
+        Reactions.forEach { Reaction ->
+            val deps = Reaction.dependencies
             val depStr = if (deps.isEmpty()) "(no inputs)" else deps.joinToString(", ") { it }
-            val targets = interaction.targets
+            val targets = Reaction.targets
             val targetStr =
                 if (targets.isEmpty()) "(no outputs)" else targets.joinToString(", ") { it }
-            println("  $depStr --> [${interaction.name}] --> $targetStr")
+            println("  $depStr --> [${Reaction.name}] --> $targetStr")
         }
         println("\n=== End of Graph ===")
     }

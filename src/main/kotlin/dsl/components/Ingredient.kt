@@ -7,16 +7,16 @@ import kotlin.reflect.KProperty
 /**
  * Property delegate for ingredients. Manages instance-specific values and triggers
  * instance updates upon modification. Automatically tracks dependencies/targets
- * when accessed within an Interaction context.
+ * when accessed within a Reaction context.
  */
 class Ingredient<T>(private val defaultValue: T) {
     /**
      * Gets the value for the current Instance.
-     * If accessed within an Interaction, registers the property as a dependency.
+     * If accessed within a Reaction, registers the property as a dependency.
      * Throws IllegalStateException if accessed outside a Instance context.
      */
     operator fun getValue(thisRef: Any?, property: KProperty<*>): T {
-        val currentInteraction = InteractionContext.getCurrentInteraction()
+        val currentReaction = ReactionContext.getCurrentReaction()
         val currentInstance = InstanceContext.getCurrentInstance() ?: throw IllegalStateException(
             "Cannot get ingredient value outside of a Instance context for property ${
                 getFullPropertyName(
@@ -25,8 +25,8 @@ class Ingredient<T>(private val defaultValue: T) {
             }"
         )
 
-        // Track dependency if we are inside an interaction's execution context.
-        currentInteraction?.addDependency(property)
+        // Track dependency if we are inside a Reaction's execution context.
+        currentReaction?.addDependency(property)
 
         // --- Access the central state store in Instance ---
         // Use computeIfAbsent for atomicity and default value handling.
@@ -45,19 +45,19 @@ class Ingredient<T>(private val defaultValue: T) {
             return value.getValue(thisRef, property) as T
         } catch (e: ClassCastException) {
             // This indicates a potential bug or corrupted state (e.g., bad deserialization)
-            throw IllegalStateException("Type mismatch for property ${getFullPropertyName(property)} in instance ${currentInstance.instanceId}. Expected ${defaultValue!!::class.simpleName} but found ${value?.let { it::class.simpleName } ?: "null"}.",
+            throw IllegalStateException("Type mismatch for property ${getFullPropertyName(property)} in instance ${currentInstance.instanceId}. Expected ${defaultValue!!::class.simpleName} but found ${value.let { it::class.simpleName } ?: "null"}.",
                 e)
         }
     }
 
     /**
      * Sets the value for the current Instance.
-     * If set within an Interaction, registers the property as a target.
+     * If set within an Reaction, registers the property as a target.
      * Notifies the current Instance of the update, triggering re-evaluation.
      * Throws IllegalStateException if accessed outside a Instance context.
      */
     operator fun setValue(thisRef: Any?, property: KProperty<*>, newValue: T) {
-        val currentInteraction = InteractionContext.getCurrentInteraction()
+        val currentReaction = ReactionContext.getCurrentReaction()
         val currentInstance = InstanceContext.getCurrentInstance() ?: throw IllegalStateException(
             "Cannot set ingredient value outside of a Instance context for property ${
                 getFullPropertyName(
@@ -66,8 +66,8 @@ class Ingredient<T>(private val defaultValue: T) {
             }"
         )
 
-        // Track target if we are inside an interaction's execution context.
-        currentInteraction?.addTarget(property)
+        // Track target if we are inside a Reaction's execution context.
+        currentReaction?.addTarget(property)
 
         // Notify the instance that this property needs to change.
         currentInstance.notifyUpdate(PropertyUpdate(property, newValue))

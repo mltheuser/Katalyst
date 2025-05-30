@@ -20,28 +20,28 @@ import kotlin.time.Duration.Companion.minutes
 
 // --- Shopping Cart Application ---
 
-// 1. Define Cart State using the Store
+// 1. Define Cart State using Ingredients
 enum class CartStatus { OPEN, PRIORITY, SUBMITTED }
 
 object Cart {
-    // Ingredient holding the list of items in the cart for a specific instance
+    // Ingredient holding the list of items in the cart
     var items by ingredient<List<String>>(emptyList())
 
-    // Ingredient holding the status of the cart for a specific instance
+    // Ingredient holding the status of the cart
     var status by ingredient(CartStatus.OPEN)
 }
 
-// 2. Define the Recipe (Interactions reacting to state changes)
+// 2. Define the Reactions
 val cartRecipe = setOf(
-    // Example: An interaction that logs when items are added/removed or status changes.
-    interaction("Log Cart Changes") {
+    // Example: An Reaction that logs when items are added/removed or status changes.
+    reaction("Log Cart Changes") {
         val currentItems = Cart.items // Dependency on items
         val currentStatus = Cart.status // Dependency on status
         println("[$instanceId] Cart State Update: Status=$currentStatus, Items=$currentItems")
-        // This interaction doesn't write (target) anything, just logs.
+        // This Reaction doesn't write anything, just logs.
     },
 
-    interaction("Monitor Cart Size") {
+    reaction("Monitor Cart Size") {
         val currentItems = Cart.items // Dependency on items
         if (currentItems.size > 3) {
             Cart.status = CartStatus.PRIORITY
@@ -49,7 +49,7 @@ val cartRecipe = setOf(
             println("[$instanceId] Cart has enough items to reach priority: Items=$currentItems")
         }
     },
-    // We could add interactions triggered specifically by CartStatus.SUBMITTED
+    // We could add Reactions triggered specifically by CartStatus.SUBMITTED
     // for example, to trigger external actions like sending notifications.
 )
 
@@ -92,7 +92,7 @@ fun main() {
         // Define Server Routing
         routing {
             // Endpoint to create a new shopping cart
-            post("/cart/create") { // The block here is already a suspend lambda
+            post("/cart/create") {
                 val cartId = "cart-" + UUID.randomUUID().toString()
                 println("Received request to create cart. Generating ID: $cartId")
 
@@ -138,14 +138,14 @@ fun main() {
                         // Read current items, add new one, and set the ingredient
                         val currentItems = Cart.items
                         println("[$cartId] Current items: $currentItems. Adding '$itemName'")
-                        Cart.items = currentItems + itemName // Setting triggers notifyUpdate -> runs interactions
+                        Cart.items = currentItems + itemName // Setting triggers notifyUpdate -> runs Reactions
 
-                        // Wait for the update (and logging interaction) to complete
+                        // Wait for the update (and logging Reaction) to complete
                         awaitIdle()
                         println("[$cartId] Item '$itemName' added successfully.")
                         addSuccessful = true // Mark success for response after the block
                     }
-                } // RecipeContext is reset after this block
+                }
 
                 if (addSuccessful) {
                     call.respond(HttpStatusCode.OK, "Item '$itemName' added to cart '$cartId'.")
@@ -174,7 +174,7 @@ fun main() {
                         println("[$cartId] Cart already submitted.")
                         finalItems = Cart.items // Get items anyway for response
                         alreadySubmitted = true
-                        // Don't change state, maybe don't even awaitIdle
+                        // Don't change state, don't even awaitIdle
                     } else {
                         println("[$cartId] Submitting order...")
                         finalItems = Cart.items // Get items before changing status
@@ -212,16 +212,15 @@ fun main() {
                 // findInstances returns Result<List<RecipeInstanceContext<*>>>
                 // We need to handle success and failure of this operation
                 findInstances("cart-*").onSuccess { instances ->
-                    instances.forEach { instanceContext ->
+                    instances.forEach { instance ->
                         // Execute code within the context of each found instance
-                        // This lambda has access to CartStore specific to 'instanceContext'
-                        instanceContext {
-                            val currentInstanceId = this.instanceId // Capture for logging
+                        // This lambda has access to CartStore specific to 'instance'
+                        instance {
                             if (Cart.status != CartStatus.SUBMITTED) {
-                                return@instanceContext
+                                return@instance
                             }
                             val itemsInCart = Cart.items
-                            println("[$currentInstanceId] Processing items for summary: $itemsInCart")
+                            println("[$instanceId] Processing items for summary: $itemsInCart")
                             itemsInCart.forEach { item ->
                                 itemsOrdered[item] = itemsOrdered.getOrDefault(item, 0) + 1
                             }

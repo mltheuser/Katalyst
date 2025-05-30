@@ -1,7 +1,7 @@
 package dsl.persistance
 
 import dsl.components.Instance
-import dsl.components.InteractionRegistry
+import dsl.components.ReactionRegistry
 import dsl.components.getFullPropertyName
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
@@ -140,14 +140,14 @@ class InstanceCache(
         val jsonString = Persistence.store.get(instanceId, lockHandle).getOrThrow()
         val instanceRecord = InstanceRecord.fromString(jsonString)
 
-        val interactions = instanceRecord.interactionRecords.map {
-            val interaction = InteractionRegistry.getByName(it.interactionId)!!
-            interaction.dependencies = interaction.dependencies.union(it.dependencies) as MutableSet<String>
-            interaction.targets = interaction.targets.union(it.targets).toMutableSet()
-            interaction
+        val Reactions = instanceRecord.ReactionRecords.map {
+            val Reaction = ReactionRegistry.getByName(it.ReactionId)!!
+            Reaction.dependencies = Reaction.dependencies.union(it.dependencies) as MutableSet<String>
+            Reaction.targets = Reaction.targets.union(it.targets).toMutableSet()
+            Reaction
         }.toSet()
 
-        val instance = Instance(instanceId, interactions, instanceRecord.expiresAfter)
+        val instance = Instance(instanceId, Reactions, instanceRecord.expiresAfter)
         instance.initialRunPerformed = instanceRecord.initialRunPerformed
         instance.instanceState.putAll(
             instanceRecord.instanceState.mapValues { ReadOnlyEncodingProxy.fromJson(it.value) })
@@ -330,18 +330,19 @@ class ReadOnlyEncodingProxy(
 fun <T> getSerializer(property: KProperty<T>): KSerializer<T> {
     val kType: KType = property.returnType
     // Get the serializer for the specific type T of the property
+    @Suppress("UNCHECKED_CAST")
     return Json.serializersModule.serializer(kType) as KSerializer<T>
 }
 
 @Serializable
-class InteractionRecord(
-    val interactionId: String, val dependencies: Set<String>, val targets: Set<String>
+class ReactionRecord(
+    val ReactionId: String, val dependencies: Set<String>, val targets: Set<String>
 )
 
 @Serializable
 class InstanceRecord(
     val instanceState: Map<String, String>,
-    val interactionRecords: List<InteractionRecord>,
+    val ReactionRecords: List<ReactionRecord>,
 
     val initialRunPerformed: Boolean,
     val expiresAfter: Duration,
@@ -350,11 +351,11 @@ class InstanceRecord(
         fun fromInstance(instance: Instance): InstanceRecord {
             return InstanceRecord(
                 instanceState = instance.instanceState.mapValues { it.value.getEncodedValue() },
-                interactionRecords = instance.interactions.map { interaction ->
-                    InteractionRecord(
-                        interaction.name,
-                        interaction.dependencies,
-                        interaction.targets,
+                ReactionRecords = instance.reactions.map { Reaction ->
+                    ReactionRecord(
+                        Reaction.name,
+                        Reaction.dependencies,
+                        Reaction.targets,
                     )
                 },
 

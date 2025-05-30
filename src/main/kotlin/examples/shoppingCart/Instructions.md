@@ -18,7 +18,7 @@
         # Add 'banana'
         curl -X POST -H "Content-Type: application/json" -d '{"itemName": "banana"}' http://localhost:8080/cart/YOUR_CART_ID/add
         ```
-        *   Check the server console logs. You should see messages about adding items and the "Log Cart Changes" interaction running.
+        *   Check the server console logs. You should see messages about adding items and the "Log Cart Changes" Reaction running.
 
     *   **Submit the Order (replace `YOUR_CART_ID`):**
         ```bash
